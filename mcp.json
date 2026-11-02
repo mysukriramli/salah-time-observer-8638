@@ -1,0 +1,35 @@
+{
+  "name": "salah-time-observer-8638",
+  "version": "1.0.0",
+  "description": "Global Salah Time Observer Agent Service & MCP Tool",
+  "tools": [
+    {
+      "name": "get_salah_times",
+      "description": "Calculate accurate prayer timings for a given latitude, longitude, and date",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "latitude": {
+            "type": "number"
+          },
+          "longitude": {
+            "type": "number"
+          },
+          "date": {
+            "type": "string"
+          },
+          "prayer": {
+            "type": "string"
+          },
+          "method": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "latitude",
+          "longitude"
+        ]
+      }
+    }
+  ]
+}
