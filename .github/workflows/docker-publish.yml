@@ -2,13 +2,14 @@ name: Build and Publish Container
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
   build-and-push:
-    if: hashFiles('Dockerfile') != ''
     runs-on: ubuntu-latest
+
     permissions:
       contents: read
       packages: write
