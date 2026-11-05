@@ -15,23 +15,13 @@ from dateutil import parser as date_parser
 from adhanpy.PrayerTimes import PrayerTimes
 from adhanpy.calculation.CalculationMethod import CalculationMethod
 
-# Optional import and protocol patch for Coordinates to guarantee unpack safety
-try:
-    from adhanpy.data.Coordinates import Coordinates
-    if not hasattr(Coordinates, "__iter__"):
-        Coordinates.__iter__ = lambda self: iter((self.latitude, self.longitude))
-    if not hasattr(Coordinates, "__getitem__"):
-        Coordinates.__getitem__ = lambda self, idx: (self.latitude, self.longitude)[idx]
-except Exception:
-    Coordinates = None
-
 # ---------------------------------------------------------------------------
 # Framework & App Initialization
 # ---------------------------------------------------------------------------
 app = FastAPI(
     title="salah-time-observer-8638",
     description="Salah State Intelligence, Solar Geometry & Islamic Observational Engine for Autonomous Agents",
-    version="2.0.2",
+    version="2.0.3",
     default_response_class=ORJSONResponse,
 )
 
@@ -107,7 +97,7 @@ class CompareLocationsInput(BaseModel):
 # Astronomical & Hijri Math
 # ---------------------------------------------------------------------------
 def gregorian_to_hijri(year: int, month: int, day: int) -> Tuple[int, int, int]:
-    """Astronomical algorithmic conversion from Gregorian date to Islamic Hijri date."""
+    """Astronomical conversion from Gregorian date to Islamic Hijri date."""
     if month < 3:
         year -= 1
         month += 12
@@ -550,7 +540,7 @@ def resolve_location(lat: Optional[float], lon: Optional[float], location_name: 
     raise HTTPException(status_code=400, detail="Must provide either coordinates (latitude & longitude) or a location name.")
 
 # ---------------------------------------------------------------------------
-# Core Calculation Pipeline (Tuple Construction)
+# Core Calculation Pipeline
 # ---------------------------------------------------------------------------
 def calculate_salah_times(
     lat: float,
@@ -563,15 +553,20 @@ def calculate_salah_times(
     local_tz = ZoneInfo(tz_str)
     req_tz = ZoneInfo(req_tz_str) if req_tz_str else None
     calc_method = resolve_method(method_name)
-    calc_params = calc_method() if callable(calc_method) else calc_method
 
     resolved_lat = float(lat)
     resolved_lon = float(lon)
 
     try:
-        # Pass coordinates strictly as a tuple (float, float) for AdhanPy unpacking
-        coordinates_tuple = (resolved_lat, resolved_lon)
-        pt = PrayerTimes(coordinates_tuple, target_date, calc_params)
+        # Pass coordinates strictly as a 2-tuple (float, float) directly to PrayerTimes
+        pt = PrayerTimes(
+            (
+                float(resolved_lat),
+                float(resolved_lon),
+            ),
+            target_date,
+            calc_method,
+        )
 
         raw_timings_local = {
             "fajr": pt.fajr if pt.fajr.tzinfo else pt.fajr.replace(tzinfo=local_tz),
@@ -686,7 +681,7 @@ def read_root() -> Dict[str, Any]:
     return {
         "status": "healthy",
         "service": "salah-time-observer-8638",
-        "version": "2.0.2",
+        "version": "2.0.3",
         "mission": "Salah State Intelligence Engine & MCP Tool for Autonomous Agents",
     }
 
