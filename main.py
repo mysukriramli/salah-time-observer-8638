@@ -17,6 +17,15 @@ from adhanpy.data.Coordinates import Coordinates
 from adhanpy.calculation.CalculationMethod import CalculationMethod
 
 # ---------------------------------------------------------------------------
+# Coordinate Protocol Patch
+# ---------------------------------------------------------------------------
+# Ensures AdhanPy Coordinates supports tuple unpacking if invoked by callers
+if not hasattr(Coordinates, "__iter__"):
+    Coordinates.__iter__ = lambda self: iter((self.latitude, self.longitude))
+if not hasattr(Coordinates, "__getitem__"):
+    Coordinates.__getitem__ = lambda self, idx: (self.latitude, self.longitude)[idx]
+
+# ---------------------------------------------------------------------------
 # Framework & App Initialization
 # ---------------------------------------------------------------------------
 app = FastAPI(
@@ -38,7 +47,6 @@ PRAYER_ALIASES: Dict[str, str] = {
     "isyak": "isha",
 }
 
-# Standard major global Islamic hubs for zero-network comparison fallback
 STANDARD_LOCATIONS: Dict[str, Tuple[float, float, str, str]] = {
     "kuala lumpur": (3.1390, 101.6869, "Kuala Lumpur", "Asia/Kuala_Lumpur"),
     "makkah": (21.4225, 39.8262, "Makkah", "Asia/Riyadh"),
@@ -83,11 +91,11 @@ class QiyamSignal(str, Enum):
 class SalahRequest(BaseModel):
     latitude: Optional[float] = Field(None, ge=-90, le=90, description="Latitude (-90 to 90)")
     longitude: Optional[float] = Field(None, ge=-180, le=180, description="Longitude (-180 to 180)")
-    location: Optional[str] = Field(None, description="Location query, e.g. 'Male, Maldives'")
+    location: Optional[str] = Field(None, description="Location query, e.g. 'Kuala Lumpur'")
     date: Optional[str] = Field(None, description="Date token ('today', 'tomorrow') or ISO date")
     prayer: Optional[str] = Field(None, description="Specific prayer filter (e.g. 'zohor', 'fajr')")
     method: Optional[str] = Field("MUSLIM_WORLD_LEAGUE", description="Calculation method")
-    requester_timezone: Optional[str] = Field(None, description="Requester IANA timezone (e.g. 'Asia/Singapore')")
+    requester_timezone: Optional[str] = Field(None, description="Requester IANA timezone (e.g. 'Asia/Kuala_Lumpur')")
 
 class CompareLocationsInput(BaseModel):
     locations: List[str] = Field(
@@ -96,10 +104,10 @@ class CompareLocationsInput(BaseModel):
     )
 
 # ---------------------------------------------------------------------------
-# Deterministic Astronomical & Hijri Math
+# Astronomical & Hijri Math
 # ---------------------------------------------------------------------------
 def gregorian_to_hijri(year: int, month: int, day: int) -> Tuple[int, int, int]:
-    """Astronomical conversion from Gregorian date to Julian Day and Hijri Calendar."""
+    """Astronomical algorithmic conversion from Gregorian date to Islamic Hijri date."""
     if month < 3:
         year -= 1
         month += 12
@@ -163,13 +171,7 @@ def calculate_solar_elevation(lat: float, lon: float, dt_utc: datetime) -> float
 # Core Salah State Intelligence Engines
 # ---------------------------------------------------------------------------
 def calculate_prayer_state(now_dt: datetime, raw_timings: Dict[str, datetime]) -> str:
-    """
-    Step 1: Prayer State Engine.
-    Continuous deterministic partition across 24h:
-    BEFORE_FAJR, FAJR, AFTER_FAJR, BEFORE_DHUHR, DHUHR, AFTER_DHUHR,
-    BEFORE_ASR, ASR, AFTER_ASR, BEFORE_MAGHRIB, MAGHRIB, AFTER_MAGHRIB,
-    BEFORE_ISHA, ISHA, AFTER_ISHA.
-    """
+    """Computes categorical prayer state across the 24-hour cycle."""
     pre_window = timedelta(minutes=20)
     prime_window = timedelta(minutes=30)
 
@@ -213,10 +215,7 @@ def calculate_prayer_state(now_dt: datetime, raw_timings: Dict[str, datetime]) -
         return PrayerState.AFTER_ISHA.value
 
 def calculate_next_prayer(now_dt: datetime, raw_timings: Dict[str, datetime]) -> Dict[str, Any]:
-    """
-    Step 2: Next Prayer Engine.
-    Outputs: next_prayer, minutes_remaining, seconds_remaining.
-    """
+    """Calculates upcoming prayer and precise countdown delta."""
     canonical = ['fajr', 'dhuhr', 'asr', 'maghrib', 'isha']
     for p in canonical:
         p_time = raw_timings[p]
@@ -229,7 +228,6 @@ def calculate_next_prayer(now_dt: datetime, raw_timings: Dict[str, datetime]) ->
                 'target_time_iso': p_time.isoformat(),
             }
 
-    # If past Isha today, next is tomorrow's Fajr
     next_fajr = raw_timings['fajr'] + timedelta(days=1)
     diff = (next_fajr - now_dt).total_seconds()
     return {
@@ -240,10 +238,7 @@ def calculate_next_prayer(now_dt: datetime, raw_timings: Dict[str, datetime]) ->
     }
 
 def calculate_previous_prayer(now_dt: datetime, raw_timings: Dict[str, datetime]) -> Dict[str, Any]:
-    """
-    Step 3: Previous Prayer Engine.
-    Outputs: previous_prayer, minutes_since.
-    """
+    """Calculates most recently entered prayer and minutes elapsed."""
     canonical = ['isha', 'maghrib', 'asr', 'dhuhr', 'fajr']
     for p in canonical:
         p_time = raw_timings[p]
@@ -256,7 +251,6 @@ def calculate_previous_prayer(now_dt: datetime, raw_timings: Dict[str, datetime]
                 'target_time_iso': p_time.isoformat(),
             }
 
-    # If before Fajr today, previous was yesterday's Isha
     prev_isha = raw_timings['isha'] - timedelta(days=1)
     diff = (now_dt - prev_isha).total_seconds()
     return {
@@ -267,10 +261,7 @@ def calculate_previous_prayer(now_dt: datetime, raw_timings: Dict[str, datetime]
     }
 
 def calculate_daily_progress(now_dt: datetime, raw_timings: Dict[str, datetime]) -> Dict[str, Any]:
-    """
-    Step 4: Daily Worship Progress.
-    Outputs: completed_prayers, remaining_prayers, completion_percentage (0-100).
-    """
+    """Evaluates daily obligatory prayer completion progress."""
     canonical = ['fajr', 'dhuhr', 'asr', 'maghrib', 'isha']
     completed = [p for p in canonical if now_dt >= raw_timings[p]]
     remaining = [p for p in canonical if now_dt < raw_timings[p]]
@@ -285,10 +276,7 @@ def calculate_daily_progress(now_dt: datetime, raw_timings: Dict[str, datetime])
     }
 
 def calculate_solar_state(lat: float, lon: float, now_dt: datetime, raw_timings: Dict[str, datetime]) -> Dict[str, Any]:
-    """
-    Step 5: Solar Position Intelligence.
-    Returns: solar_elevation, sunrise_offset (minutes), sunset_offset (minutes).
-    """
+    """Calculates solar position and twilight offsets."""
     utc_dt = now_dt.astimezone(ZoneInfo("UTC")) if now_dt.tzinfo else now_dt.replace(tzinfo=ZoneInfo("UTC"))
     elev = calculate_solar_elevation(lat, lon, utc_dt)
 
@@ -305,10 +293,7 @@ def calculate_solar_state(lat: float, lon: float, now_dt: datetime, raw_timings:
     }
 
 def calculate_ramadan_state(now_dt: datetime, raw_timings: Dict[str, datetime]) -> Dict[str, Any]:
-    """
-    Step 6: Ramadan Awareness.
-    Returns: is_ramadan, ramadan_day, fasting_active, iftar_countdown, suhoor_countdown.
-    """
+    """Identifies Ramadan dates, fasting activity, iftar, and suhoor status."""
     local_date = now_dt.date()
     hy, hm, hd = gregorian_to_hijri(local_date.year, local_date.month, local_date.day)
     is_ramadan = (hm == 9)
@@ -342,11 +327,7 @@ def calculate_ramadan_state(now_dt: datetime, raw_timings: Dict[str, datetime]) 
     }
 
 def calculate_tahajjud_window(now_dt: datetime, raw_timings: Dict[str, datetime]) -> Dict[str, Any]:
-    """
-    Step 7: Tahajjud Window Engine.
-    Last third of the night between sunset (Maghrib) and true dawn (Fajr).
-    Returns: window_start, window_end, minutes_remaining.
-    """
+    """Calculates the final third of the night for Tahajjud prayer."""
     maghrib = raw_timings['maghrib']
     fajr = raw_timings['fajr']
 
@@ -384,10 +365,7 @@ def calculate_tahajjud_window(now_dt: datetime, raw_timings: Dict[str, datetime]
     }
 
 def calculate_qiyam_signal(now_dt: datetime, raw_timings: Dict[str, datetime]) -> Dict[str, Any]:
-    """
-    Step 8: Qiyam Opportunity Signal.
-    Outputs: LOW, MEDIUM, HIGH, PEAK based on night progression.
-    """
+    """Computes Qiyam/night-worship signal intensity based on nocturnal progression."""
     maghrib = raw_timings['maghrib']
     fajr = raw_timings['fajr']
     isha = raw_timings['isha']
@@ -431,16 +409,12 @@ def calculate_qiyam_signal(now_dt: datetime, raw_timings: Dict[str, datetime]) -
     }
 
 def calculate_jumuah_state(now_dt: datetime, raw_timings: Dict[str, datetime]) -> Dict[str, Any]:
-    """
-    Step 9: Jumuah Intelligence.
-    Outputs: is_friday, hours_to_jumuah, jumuah_active.
-    """
+    """Computes Friday Jumuah congregational awareness and countdown."""
     weekday = now_dt.weekday()  # Friday is 4
     is_friday = (weekday == 4)
     dhuhr = raw_timings['dhuhr']
 
     if is_friday:
-        # Align Dhuhr date explicitly with Friday's current calendar day
         jumuah_start = dhuhr.replace(year=now_dt.year, month=now_dt.month, day=now_dt.day)
         jumuah_end = jumuah_start + timedelta(minutes=75)
 
@@ -481,50 +455,40 @@ def calculate_salah_state_index(
     qiyam_signal: Dict[str, Any],
     jumuah_state: Dict[str, Any],
 ) -> float:
-    """
-    Step 10: Unified Salah State Index (0-100).
-    Primary machine-consumable signal synthesizing daily progress, prayer proximity,
-    Ramadan fasting, Qiyam/Tahajjud sanctity, and Friday congregational awareness.
-    """
-    # 1. Base progress (0 to 35 points)
-    progress_component = (daily_progress.get('completion_percentage', 0.0) / 100.0) * 35.0
+    """Synthesizes an operational 0-100 Salah State Index for autonomous agents."""
+    progress_comp = (daily_progress.get('completion_percentage', 0.0) / 100.0) * 35.0
 
-    # 2. Proximity to next prayer (0 to 25 points)
     mins = max(0.0, next_prayer.get('minutes_remaining', 180.0))
     if mins <= 15.0:
-        proximity_component = 25.0
+        proximity_comp = 25.0
     elif mins <= 45.0:
-        proximity_component = 15.0 + (45.0 - mins) / 30.0 * 10.0
+        proximity_comp = 15.0 + (45.0 - mins) / 30.0 * 10.0
     elif mins <= 120.0:
-        proximity_component = 5.0 + (120.0 - mins) / 75.0 * 10.0
+        proximity_comp = 5.0 + (120.0 - mins) / 75.0 * 10.0
     else:
-        proximity_component = 5.0
+        proximity_comp = 5.0
 
-    # 3. Night worship & Tahajjud state (0 to 20 points)
     q_map = {
         QiyamSignal.PEAK.value: 20.0,
         QiyamSignal.HIGH.value: 12.0,
         QiyamSignal.MEDIUM.value: 6.0,
         QiyamSignal.LOW.value: 0.0,
     }
-    qiyam_component = q_map.get(qiyam_signal.get('qiyam_signal', 'LOW'), 0.0)
+    qiyam_comp = q_map.get(qiyam_signal.get('qiyam_signal', 'LOW'), 0.0)
+    ramadan_comp = 12.0 if ramadan_state.get('fasting_active') else (6.0 if ramadan_state.get('is_ramadan') else 0.0)
 
-    # 4. Ramadan fasting awareness (0 to 12 points)
-    ramadan_component = 12.0 if ramadan_state.get('fasting_active') else (6.0 if ramadan_state.get('is_ramadan') else 0.0)
-
-    # 5. Jumuah awareness (0 to 8 points)
     if jumuah_state.get('jumuah_active'):
-        jumuah_component = 8.0
+        jumuah_comp = 8.0
     elif jumuah_state.get('is_friday') and jumuah_state.get('hours_to_jumuah', 99) < 4.0:
-        jumuah_component = 5.0
+        jumuah_comp = 5.0
     else:
-        jumuah_component = 0.0
+        jumuah_comp = 0.0
 
-    raw_score = progress_component + proximity_component + qiyam_component + ramadan_component + jumuah_component
+    raw_score = progress_comp + proximity_comp + qiyam_comp + ramadan_comp + jumuah_comp
     return round(float(min(100.0, max(10.0, raw_score))), 1)
 
 # ---------------------------------------------------------------------------
-# Preserved Location & AdhanPy Helper Functions
+# Location & Method Resolvers
 # ---------------------------------------------------------------------------
 def resolve_method(name: Optional[str] = None):
     if not name:
@@ -573,19 +537,21 @@ def resolve_location(lat: Optional[float], lon: Optional[float], location_name: 
         clean_name = location_name.strip().lower()
         if clean_name in STANDARD_LOCATIONS:
             return STANDARD_LOCATIONS[clean_name][0], STANDARD_LOCATIONS[clean_name][1]
-        try:
-            loc = geolocator.geocode(location_name, timeout=5)
-            if loc:
-                return loc.latitude, loc.longitude
-        except Exception:
-            pass
-        # Substring fallback
         for key, val in STANDARD_LOCATIONS.items():
             if clean_name in key or key in clean_name:
                 return val[0], val[1]
+        try:
+            loc = geolocator.geocode(location_name, timeout=5)
+            if loc:
+                return float(loc.latitude), float(loc.longitude)
+        except Exception:
+            pass
         raise HTTPException(status_code=404, detail=f"Unable to geocode location: '{location_name}'")
     raise HTTPException(status_code=400, detail="Must provide either coordinates (latitude & longitude) or a location name.")
 
+# ---------------------------------------------------------------------------
+# Core Calculation Pipeline (Bug-Free Attribute Access)
+# ---------------------------------------------------------------------------
 def calculate_salah_times(
     lat: float,
     lon: float,
@@ -594,17 +560,19 @@ def calculate_salah_times(
     tz_str: str,
     req_tz_str: Optional[str],
 ) -> Dict[str, Any]:
-    """
-    Step 11: Core calculation engine preserving all AdhanPy math,
-    ISO timings, and timezone conversions while attaching rich intelligence signals.
-    """
     local_tz = ZoneInfo(tz_str)
     req_tz = ZoneInfo(req_tz_str) if req_tz_str else None
     calc_method = resolve_method(method_name)
+    calc_params = calc_method() if callable(calc_method) else calc_method
 
     try:
+        # Instantiate AdhanPy Coordinates directly
         coords = Coordinates(float(lat), float(lon))
-        pt = PrayerTimes(coords, target_date, calc_method)
+        # Direct attribute access - never unpack coords object
+        resolved_lat = float(coords.latitude)
+        resolved_lon = float(coords.longitude)
+
+        pt = PrayerTimes(coords, target_date, calc_params)
         raw_timings_local = {
             "fajr": pt.fajr if pt.fajr.tzinfo else pt.fajr.replace(tzinfo=local_tz),
             "sunrise": pt.sunrise if pt.sunrise.tzinfo else pt.sunrise.replace(tzinfo=local_tz),
@@ -616,7 +584,6 @@ def calculate_salah_times(
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Calculation engine failure: {str(exc)}")
 
-    # Format timings preserving existing API contract
     results = {}
     for name, local_dt in raw_timings_local.items():
         utc_dt = local_dt.astimezone(ZoneInfo("UTC"))
@@ -628,13 +595,12 @@ def calculate_salah_times(
             entry["requester_local_iso"] = local_dt.astimezone(req_tz).isoformat()
         results[name] = entry
 
-    # Compute operational intelligence signals
     now_local = datetime.now(local_tz)
     prayer_state = calculate_prayer_state(now_local, raw_timings_local)
     next_p = calculate_next_prayer(now_local, raw_timings_local)
     prev_p = calculate_previous_prayer(now_local, raw_timings_local)
     progress = calculate_daily_progress(now_local, raw_timings_local)
-    solar_state = calculate_solar_state(lat, lon, now_local, raw_timings_local)
+    solar_state = calculate_solar_state(resolved_lat, resolved_lon, now_local, raw_timings_local)
     ramadan_state = calculate_ramadan_state(now_local, raw_timings_local)
     tahajjud = calculate_tahajjud_window(now_local, raw_timings_local)
     qiyam = calculate_qiyam_signal(now_local, raw_timings_local)
@@ -649,13 +615,11 @@ def calculate_salah_times(
     )
 
     return {
-        # Preserved legacy response fields
-        "coordinates": {"latitude": lat, "longitude": lon},
+        "coordinates": {"latitude": resolved_lat, "longitude": resolved_lon},
         "target_timezone": tz_str,
         "date": target_date.isoformat(),
         "method": str(calc_method),
         "timings": results,
-        # Extended machine-consumable signals
         "current_prayer_state": prayer_state,
         "next_prayer": next_p["next_prayer"],
         "time_remaining": {
@@ -674,16 +638,12 @@ def calculate_salah_times(
     }
 
 # ---------------------------------------------------------------------------
-# Step 12: Multi-Location Comparison Engine
+# Multi-Location Comparison Engine
 # ---------------------------------------------------------------------------
 def compare_locations(
     locations: Optional[List[str]] = None,
     method_name: str = "MUSLIM_WORLD_LEAGUE",
 ) -> Dict[str, Any]:
-    """
-    Step 12: Multi-Location Comparison.
-    Compares real-time prayer schedule, next prayer, and minutes to next prayer across regions.
-    """
     if not locations:
         locations = ["Kuala Lumpur", "Makkah", "Istanbul", "London"]
 
@@ -719,7 +679,7 @@ def compare_locations(
     return {"comparison": comparisons, "total_locations": len(comparisons)}
 
 # ---------------------------------------------------------------------------
-# API Endpoints
+# API Endpoints & Routes
 # ---------------------------------------------------------------------------
 @app.get("/")
 def read_root() -> Dict[str, Any]:
@@ -736,7 +696,6 @@ def health_check() -> Dict[str, Any]:
 
 @app.get("/tools")
 def list_tools() -> Dict[str, Any]:
-    """MCP Tool Discovery Registry."""
     return {
         "tools": [
             {
@@ -791,7 +750,7 @@ def get_salah(
     return data
 
 @app.post("/salah")
-def post_salah(payload: SalahRequest) -> Dict[str, Any]:
+def post_salah(payload: SalahRequest = Body(...)) -> Dict[str, Any]:
     lat, lon = resolve_location(payload.latitude, payload.longitude, payload.location)
     tz_str = tf.timezone_at(lat=lat, lng=lon) or "UTC"
     target_date = parse_target_date(payload.date, ZoneInfo(tz_str))
