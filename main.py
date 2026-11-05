@@ -13,17 +13,17 @@ from geopy.geocoders import Nominatim
 from dateutil import parser as date_parser
 
 from adhanpy.PrayerTimes import PrayerTimes
-from adhanpy.data.Coordinates import Coordinates
 from adhanpy.calculation.CalculationMethod import CalculationMethod
 
-# ---------------------------------------------------------------------------
-# Coordinate Protocol Patch
-# ---------------------------------------------------------------------------
-# Ensures AdhanPy Coordinates supports tuple unpacking if invoked by callers
-if not hasattr(Coordinates, "__iter__"):
-    Coordinates.__iter__ = lambda self: iter((self.latitude, self.longitude))
-if not hasattr(Coordinates, "__getitem__"):
-    Coordinates.__getitem__ = lambda self, idx: (self.latitude, self.longitude)[idx]
+# Optional import and monkeypatch of Coordinates for compatibility with external callers
+try:
+    from adhanpy.data.Coordinates import Coordinates
+    if not hasattr(Coordinates, "__iter__"):
+        Coordinates.__iter__ = lambda self: iter((self.latitude, self.longitude))
+    if not hasattr(Coordinates, "__getitem__"):
+        Coordinates.__getitem__ = lambda self, idx: (self.latitude, self.longitude)[idx]
+except ImportError:
+    Coordinates = None
 
 # ---------------------------------------------------------------------------
 # Framework & App Initialization
@@ -31,7 +31,7 @@ if not hasattr(Coordinates, "__getitem__"):
 app = FastAPI(
     title="salah-time-observer-8638",
     description="Salah State Intelligence, Solar Geometry & Islamic Observational Engine for Autonomous Agents",
-    version="2.0.0",
+    version="2.0.1",
     default_response_class=ORJSONResponse,
 )
 
@@ -142,7 +142,7 @@ def gregorian_to_hijri(year: int, month: int, day: int) -> Tuple[int, int, int]:
     return int(h_year), int(h_month), int(h_day)
 
 def calculate_solar_elevation(lat: float, lon: float, dt_utc: datetime) -> float:
-    """Computes exact topocentric solar elevation in degrees using spherical solar positioning."""
+    """Computes topocentric solar elevation in degrees using spherical solar positioning."""
     day_of_year = dt_utc.timetuple().tm_yday
     hour_utc = dt_utc.hour + dt_utc.minute / 60.0 + dt_utc.second / 3600.0
     gamma = 2.0 * math.pi / 365.25 * (day_of_year - 1 + (hour_utc - 12.0) / 24.0)
@@ -171,7 +171,7 @@ def calculate_solar_elevation(lat: float, lon: float, dt_utc: datetime) -> float
 # Core Salah State Intelligence Engines
 # ---------------------------------------------------------------------------
 def calculate_prayer_state(now_dt: datetime, raw_timings: Dict[str, datetime]) -> str:
-    """Computes categorical prayer state across the 24-hour cycle."""
+    """Computes categorical prayer state across the 24-hour diurnal cycle."""
     pre_window = timedelta(minutes=20)
     prime_window = timedelta(minutes=30)
 
@@ -215,7 +215,7 @@ def calculate_prayer_state(now_dt: datetime, raw_timings: Dict[str, datetime]) -
         return PrayerState.AFTER_ISHA.value
 
 def calculate_next_prayer(now_dt: datetime, raw_timings: Dict[str, datetime]) -> Dict[str, Any]:
-    """Calculates upcoming prayer and precise countdown delta."""
+    """Calculates upcoming prayer and countdown time."""
     canonical = ['fajr', 'dhuhr', 'asr', 'maghrib', 'isha']
     for p in canonical:
         p_time = raw_timings[p]
@@ -238,7 +238,7 @@ def calculate_next_prayer(now_dt: datetime, raw_timings: Dict[str, datetime]) ->
     }
 
 def calculate_previous_prayer(now_dt: datetime, raw_timings: Dict[str, datetime]) -> Dict[str, Any]:
-    """Calculates most recently entered prayer and minutes elapsed."""
+    """Calculates most recently entered prayer and elapsed time."""
     canonical = ['isha', 'maghrib', 'asr', 'dhuhr', 'fajr']
     for p in canonical:
         p_time = raw_timings[p]
@@ -365,7 +365,7 @@ def calculate_tahajjud_window(now_dt: datetime, raw_timings: Dict[str, datetime]
     }
 
 def calculate_qiyam_signal(now_dt: datetime, raw_timings: Dict[str, datetime]) -> Dict[str, Any]:
-    """Computes Qiyam/night-worship signal intensity based on nocturnal progression."""
+    """Computes Qiyam night-worship signal intensity based on nocturnal progression."""
     maghrib = raw_timings['maghrib']
     fajr = raw_timings['fajr']
     isha = raw_timings['isha']
@@ -410,7 +410,7 @@ def calculate_qiyam_signal(now_dt: datetime, raw_timings: Dict[str, datetime]) -
 
 def calculate_jumuah_state(now_dt: datetime, raw_timings: Dict[str, datetime]) -> Dict[str, Any]:
     """Computes Friday Jumuah congregational awareness and countdown."""
-    weekday = now_dt.weekday()  # Friday is 4
+    weekday = now_dt.weekday()
     is_friday = (weekday == 4)
     dhuhr = raw_timings['dhuhr']
 
@@ -550,7 +550,7 @@ def resolve_location(lat: Optional[float], lon: Optional[float], location_name: 
     raise HTTPException(status_code=400, detail="Must provide either coordinates (latitude & longitude) or a location name.")
 
 # ---------------------------------------------------------------------------
-# Core Calculation Pipeline (Bug-Free Attribute Access)
+# Core Calculation Pipeline (Tuple Unpack Fix)
 # ---------------------------------------------------------------------------
 def calculate_salah_times(
     lat: float,
@@ -565,14 +565,14 @@ def calculate_salah_times(
     calc_method = resolve_method(method_name)
     calc_params = calc_method() if callable(calc_method) else calc_method
 
-    try:
-        # Instantiate AdhanPy Coordinates directly
-        coords = Coordinates(float(lat), float(lon))
-        # Direct attribute access - never unpack coords object
-        resolved_lat = float(coords.latitude)
-        resolved_lon = float(coords.longitude)
+    resolved_lat = float(lat)
+    resolved_lon = float(lon)
 
-        pt = PrayerTimes(coords, target_date, calc_params)
+    try:
+        # Pass coordinates strictly as a tuple (float, float) for AdhanPy unpacking
+        coordinates_tuple = (resolved_lat, resolved_lon)
+        pt = PrayerTimes(coordinates_tuple, target_date, calc_params)
+
         raw_timings_local = {
             "fajr": pt.fajr if pt.fajr.tzinfo else pt.fajr.replace(tzinfo=local_tz),
             "sunrise": pt.sunrise if pt.sunrise.tzinfo else pt.sunrise.replace(tzinfo=local_tz),
@@ -679,14 +679,14 @@ def compare_locations(
     return {"comparison": comparisons, "total_locations": len(comparisons)}
 
 # ---------------------------------------------------------------------------
-# API Endpoints & Routes
+# API Endpoints
 # ---------------------------------------------------------------------------
 @app.get("/")
 def read_root() -> Dict[str, Any]:
     return {
         "status": "healthy",
         "service": "salah-time-observer-8638",
-        "version": "2.0.0",
+        "version": "2.0.1",
         "mission": "Salah State Intelligence Engine & MCP Tool for Autonomous Agents",
     }
 
