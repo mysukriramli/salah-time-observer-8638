@@ -15,14 +15,14 @@ from dateutil import parser as date_parser
 from adhanpy.PrayerTimes import PrayerTimes
 from adhanpy.calculation.CalculationMethod import CalculationMethod
 
-# Optional import and monkeypatch of Coordinates for compatibility with external callers
+# Optional import and protocol patch for Coordinates to guarantee unpack safety
 try:
     from adhanpy.data.Coordinates import Coordinates
     if not hasattr(Coordinates, "__iter__"):
         Coordinates.__iter__ = lambda self: iter((self.latitude, self.longitude))
     if not hasattr(Coordinates, "__getitem__"):
         Coordinates.__getitem__ = lambda self, idx: (self.latitude, self.longitude)[idx]
-except ImportError:
+except Exception:
     Coordinates = None
 
 # ---------------------------------------------------------------------------
@@ -31,7 +31,7 @@ except ImportError:
 app = FastAPI(
     title="salah-time-observer-8638",
     description="Salah State Intelligence, Solar Geometry & Islamic Observational Engine for Autonomous Agents",
-    version="2.0.1",
+    version="2.0.2",
     default_response_class=ORJSONResponse,
 )
 
@@ -550,7 +550,7 @@ def resolve_location(lat: Optional[float], lon: Optional[float], location_name: 
     raise HTTPException(status_code=400, detail="Must provide either coordinates (latitude & longitude) or a location name.")
 
 # ---------------------------------------------------------------------------
-# Core Calculation Pipeline (Tuple Unpack Fix)
+# Core Calculation Pipeline (Tuple Construction)
 # ---------------------------------------------------------------------------
 def calculate_salah_times(
     lat: float,
@@ -686,7 +686,7 @@ def read_root() -> Dict[str, Any]:
     return {
         "status": "healthy",
         "service": "salah-time-observer-8638",
-        "version": "2.0.1",
+        "version": "2.0.2",
         "mission": "Salah State Intelligence Engine & MCP Tool for Autonomous Agents",
     }
 
