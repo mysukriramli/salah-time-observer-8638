@@ -21,7 +21,7 @@ from adhanpy.calculation.CalculationMethod import CalculationMethod
 app = FastAPI(
     title="salah-time-observer-8638",
     description="Salah State Intelligence, Solar Geometry & Islamic Observational Engine for Autonomous Agents",
-    version="2.0.3",
+    version="2.0.4",
     default_response_class=ORJSONResponse,
 )
 
@@ -97,7 +97,7 @@ class CompareLocationsInput(BaseModel):
 # Astronomical & Hijri Math
 # ---------------------------------------------------------------------------
 def gregorian_to_hijri(year: int, month: int, day: int) -> Tuple[int, int, int]:
-    """Astronomical conversion from Gregorian date to Islamic Hijri date."""
+    """Astronomical algorithmic conversion from Gregorian date to Islamic Hijri date."""
     if month < 3:
         year -= 1
         month += 12
@@ -540,7 +540,7 @@ def resolve_location(lat: Optional[float], lon: Optional[float], location_name: 
     raise HTTPException(status_code=400, detail="Must provide either coordinates (latitude & longitude) or a location name.")
 
 # ---------------------------------------------------------------------------
-# Core Calculation Pipeline
+# Core Calculation Pipeline (Tuple Construction)
 # ---------------------------------------------------------------------------
 def calculate_salah_times(
     lat: float,
@@ -681,7 +681,7 @@ def read_root() -> Dict[str, Any]:
     return {
         "status": "healthy",
         "service": "salah-time-observer-8638",
-        "version": "2.0.3",
+        "version": "2.0.4",
         "mission": "Salah State Intelligence Engine & MCP Tool for Autonomous Agents",
     }
 
